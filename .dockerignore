@@ -1,0 +1,14 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+**/*.user
+**/*.suo
+**/*.db
+**/*.sqlite
+**/.DS_Store
+.git/
+.gitignore
+.vscode/
+.env
+node_modules/
