@@ -21,7 +21,6 @@ public class ComponentsController : ControllerBase
         _cache = cache;
     }
 
-    [Authorize]
     [HttpGet]
     public async Task<IActionResult> Smart([FromQuery] string type = "all", [FromQuery] string? search = null,
         [FromQuery] int limit = 50, [FromQuery] int offset = 0,

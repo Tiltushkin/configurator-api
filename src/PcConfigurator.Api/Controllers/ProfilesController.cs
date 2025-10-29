@@ -35,7 +35,7 @@ public class ProfilesController : ControllerBase
         var u = await _db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id.Value, ct);
         if (u is null) return NotFound();
 
-        return Ok(new ProfileResponse(u.Id, u.Login, u.DisplayName, u.AvatarUrl, u.CreatedAt));
+        return Ok(new ProfileResponse(u.Id, u.Login, u.DisplayName, u.AvatarUrl, u.IsAdmin, u.CreatedAt));
     }
 
     [HttpGet("{userId:guid}")]
@@ -44,7 +44,7 @@ public class ProfilesController : ControllerBase
     {
         var u = await _db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId, ct);
         if (u is null) return NotFound();
-        return Ok(new ProfileResponse(u.Id, u.Login, u.DisplayName, u.AvatarUrl, u.CreatedAt));
+        return Ok(new ProfileResponse(u.Id, u.Login, u.DisplayName, u.AvatarUrl, u.IsAdmin, u.CreatedAt));
     }
 
     [Authorize]
