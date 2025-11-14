@@ -19,8 +19,9 @@ public class AppDbContext : DbContext
     public DbSet<Szo> Szos => Set<Szo>();
     public DbSet<Hdd2_5> Hdd2_5s => Set<Hdd2_5>();
     public DbSet<Hdd3_5> Hdd3_5s => Set<Hdd3_5>();
-    public DbSet<BuildHdd> BuildHdds => Set<BuildHdd>();
     public DbSet<Build> Builds => Set<Build>();
+    public DbSet<BuildSsd> BuildSsds => Set<BuildSsd>();
+    public DbSet<BuildHdd> BuildHdds => Set<BuildHdd>();
     public DbSet<BuildShare> BuildShares => Set<BuildShare>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -151,17 +152,21 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Build>()
             .HasMany(b => b.Ssds)
-            .WithMany()
-            .UsingEntity<Dictionary<string, object>>(
-                "BuildSsd",
-                r => r.HasOne<Ssd>().WithMany().HasForeignKey("SsdId").OnDelete(DeleteBehavior.Cascade),
-                l => l.HasOne<Build>().WithMany().HasForeignKey("BuildId").OnDelete(DeleteBehavior.Cascade),
-                j =>
-                {
-                    j.ToTable("BuildSsds");
-                    j.HasKey("BuildId", "SsdId");
-                }
-            );
+            .WithOne(bs => bs.Build)
+            .HasForeignKey(bs => bs.BuildId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<BuildSsd>(bs =>
+        {
+            bs.ToTable("BuildSsds");
+            bs.HasKey(x => x.Id);
+            bs.Property(x => x.Id).UseIdentityColumn();
+            bs.HasIndex(x => new { x.BuildId });
+            bs.HasOne(x => x.Build)
+              .WithMany(b => b.Ssds)
+              .HasForeignKey(x => x.BuildId)
+              .OnDelete(DeleteBehavior.Cascade);
+        });
 
         modelBuilder.Entity<BuildHdd>()
             .HasKey(x => new { x.BuildId, x.DriveId });

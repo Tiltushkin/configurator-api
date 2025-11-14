@@ -26,7 +26,6 @@ public class BuildsController : ControllerBase
         return null;
     }
 
-    // GET /api/builds?scope=mine|public|all&userId={guid?}
     [HttpGet]
     public async Task<IActionResult> List(
         [FromQuery] string? scope = "mine",
@@ -71,7 +70,7 @@ public class BuildsController : ControllerBase
                 b.CaseId,
                 b.CoolingId,
                 b.MemoryId,
-                b.Ssds.Select(s => s.Id).ToArray(),
+                b.Ssds.Select(s => s.SsdId).ToArray(),
                 b.Hdds.Select(h => h.DriveId).ToArray(),
                 b.IsPublic,
                 b.CreatedAt,
@@ -81,13 +80,10 @@ public class BuildsController : ControllerBase
         return Ok(rows);
     }
 
-    // GET /api/builds/{id}
+    [AllowAnonymous]
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get([FromRoute] Guid id, CancellationToken ct = default)
     {
-        var meOpt = TryGetUserId();
-        if (meOpt is null) return Unauthorized();
-        var meId = meOpt.Value;
 
         var b = await _db.Builds
             .AsNoTracking()
@@ -95,15 +91,21 @@ public class BuildsController : ControllerBase
             .FirstOrDefaultAsync(x => x.Id == id, ct);
 
         if (b is null) return NotFound();
-        if (!(b.IsPublic || b.OwnerId == meId)) return Forbid();
+
+        var ssdIds = _db.Entry(b).Collection(x => x.Ssds).IsLoaded
+            ? b.Ssds.Select(s => s.SsdId).ToArray()
+            : await _db.Entry(b).Collection(x => x.Ssds).Query().Select(s => s.SsdId).ToArrayAsync(ct);
+
+        var hddIds = _db.Entry(b).Collection(x => x.Hdds).IsLoaded
+            ? b.Hdds.Select(h => h.DriveId).ToArray()
+            : await _db.Entry(b).Collection(x => x.Hdds).Query().Select(h => h.DriveId).ToArrayAsync(ct);
 
         return Ok(new BuildResponse(b.Id, b.OwnerId, b.Owner.DisplayName, b.Name, b.Description, b.CpuId, b.GpuId, b.MbId, b.PsuId,
         b.CaseId, b.CoolingId, b.MemoryId,
-        _db.Entry(b).Collection(x => x.Ssds).IsLoaded ? b.Ssds.Select(s => s.Id).ToArray() : _db.Entry(b).Collection(x => x.Ssds).Query().Select(s => s.Id).ToArray(),
-        b.Hdds.Select(h => h.DriveId).ToArray(), b.IsPublic, b.CreatedAt, b.UpdatedAt));
+        ssdIds,
+        hddIds, b.IsPublic, b.CreatedAt, b.UpdatedAt));
     }
 
-    // POST /api/builds
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] BuildCreateRequest req, CancellationToken ct = default)
     {
@@ -134,30 +136,44 @@ public class BuildsController : ControllerBase
 
         if (req.SsdIds is { Length: > 0 })
         {
-            var ssdIds = req.SsdIds.ToHashSet();
-            var ssds = await _db.Ssds.Where(x => ssdIds.Contains(x.Id)).ToListAsync(ct);
-            if (ssds.Count != ssdIds.Count) throw new ArgumentException("Some SSD ids not found");
-            foreach (var s in ssds) b.Ssds.Add(s);
+            var distinct = req.SsdIds.Distinct().ToArray();
+            var found = await _db.Ssds.Where(x => distinct.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            if (found.Count != distinct.Length) throw new ArgumentException("Some SSD ids not found");
+            foreach (var sid in req.SsdIds)
+            {
+                b.Ssds.Add(new BuildSsd { SsdId = sid });
+            }
         }
 
         if (req.HddIds is { Length: > 0 })
         {
             var links = await ResolveHddsAsync(req.HddIds, ct);
             if (links.Count != req.HddIds.Distinct().Count()) throw new ArgumentException("Some HDD ids not found");
-            foreach (var l in links) b.Hdds.Add(l);
+            foreach (var l in links)
+            {
+                l.BuildId = b.Id;
+                b.Hdds.Add(l);
+            }
         }
 
         _db.Builds.Add(b);
         await _db.SaveChangesAsync(ct);
         await _db.Entry(b).Reference(x => x.Owner).LoadAsync(ct);
 
+        var ssdIds = _db.Entry(b).Collection(x => x.Ssds).IsLoaded
+            ? b.Ssds.Select(s => s.SsdId).ToArray()
+            : await _db.Entry(b).Collection(x => x.Ssds).Query().Select(s => s.SsdId).ToArrayAsync(ct);
+
+        var hddIds = _db.Entry(b).Collection(x => x.Hdds).IsLoaded
+            ? b.Hdds.Select(h => h.DriveId).ToArray()
+            : await _db.Entry(b).Collection(x => x.Hdds).Query().Select(h => h.DriveId).ToArrayAsync(ct);
+
         return Ok(new BuildResponse(b.Id, b.OwnerId, b.Owner.DisplayName, b.Name, b.Description, b.CpuId, b.GpuId, b.MbId, b.PsuId,
         b.CaseId, b.CoolingId, b.MemoryId,
-        _db.Entry(b).Collection(x => x.Ssds).IsLoaded ? b.Ssds.Select(s => s.Id).ToArray() : _db.Entry(b).Collection(x => x.Ssds).Query().Select(s => s.Id).ToArray(),
-        b.Hdds.Select(h => h.DriveId).ToArray(), b.IsPublic, b.CreatedAt, b.UpdatedAt));
+        ssdIds,
+        hddIds, b.IsPublic, b.CreatedAt, b.UpdatedAt));
     }
 
-    // PUT /api/builds/{id}
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update([FromRoute] Guid id, [FromBody] BuildUpdateRequest req, CancellationToken ct = default)
     {
@@ -190,24 +206,38 @@ public class BuildsController : ControllerBase
 
         if (req.SsdIds is { Length: > 0 })
         {
-            var ssdIds = req.SsdIds.ToHashSet();
-            var ssds = await _db.Ssds.Where(x => ssdIds.Contains(x.Id)).ToListAsync(ct);
-            if (ssds.Count != ssdIds.Count) throw new ArgumentException("Some SSD ids not found");
-            foreach (var s in ssds) b.Ssds.Add(s);
+            var distinct = req.SsdIds.Distinct().ToArray();
+            var found = await _db.Ssds.Where(x => distinct.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            if (found.Count != distinct.Length) throw new ArgumentException("Some SSD ids not found");
+
+            var existing = await _db.BuildSsds.Where(x => x.BuildId == b.Id).ToListAsync(ct);
+            if (existing.Any()) _db.BuildSsds.RemoveRange(existing);
+
+            foreach (var sid in req.SsdIds)
+            {
+                _db.BuildSsds.Add(new BuildSsd { BuildId = b.Id, SsdId = sid });
+            }
         }
 
         if (req.HddIds is { Length: > 0 })
         {
             var links = await ResolveHddsAsync(req.HddIds, ct);
             if (links.Count != req.HddIds.Distinct().Count()) throw new ArgumentException("Some HDD ids not found");
-            foreach (var l in links) b.Hdds.Add(l);
+
+            var existingHdds = await _db.BuildHdds.Where(x => x.BuildId == b.Id).ToListAsync(ct);
+            if (existingHdds.Any()) _db.BuildHdds.RemoveRange(existingHdds);
+
+            foreach (var l in links)
+            {
+                l.BuildId = b.Id;
+                _db.BuildHdds.Add(l);
+            }
         }
 
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
 
-    // DELETE /api/builds/{id}
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete([FromRoute] Guid id, CancellationToken ct = default)
     {
@@ -224,7 +254,6 @@ public class BuildsController : ControllerBase
         return NoContent();
     }
 
-    // POST /api/builds/{id}/share?expireDays=30
     [HttpPost("{id:guid}/share")]
     public async Task<IActionResult> Share([FromRoute] Guid id, [FromQuery] int? expireDays, CancellationToken ct = default)
     {
@@ -252,7 +281,6 @@ public class BuildsController : ControllerBase
         return Ok(new ShareResponse(token, url, share.ExpiresAt));
     }
 
-    // GET /api/builds/shared/{token}
     [AllowAnonymous]
     [HttpGet("shared/{token}")]
     public async Task<IActionResult> GetShared([FromRoute] string token, CancellationToken ct = default)
@@ -266,10 +294,19 @@ public class BuildsController : ControllerBase
         if (s.ExpiresAt.HasValue && s.ExpiresAt.Value < DateTime.UtcNow) return NotFound();
 
         var b = s.Build!;
+
+        var ssdIds = _db.Entry(b).Collection(x => x.Ssds).IsLoaded
+            ? b.Ssds.Select(s => s.SsdId).ToArray()
+            : await _db.Entry(b).Collection(x => x.Ssds).Query().Select(s => s.SsdId).ToArrayAsync(ct);
+
+        var hddIds = _db.Entry(b).Collection(x => x.Hdds).IsLoaded
+            ? b.Hdds.Select(h => h.DriveId).ToArray()
+            : await _db.Entry(b).Collection(x => x.Hdds).Query().Select(h => h.DriveId).ToArrayAsync(ct);
+
         return Ok(new BuildResponse(b.Id, b.OwnerId, b.Owner.DisplayName, b.Name, b.Description, b.CpuId, b.GpuId, b.MbId, b.PsuId,
         b.CaseId, b.CoolingId, b.MemoryId,
-        _db.Entry(b).Collection(x => x.Ssds).IsLoaded ? b.Ssds.Select(s => s.Id).ToArray() : _db.Entry(b).Collection(x => x.Ssds).Query().Select(s => s.Id).ToArray(),
-        b.Hdds.Select(h => h.DriveId).ToArray(), b.IsPublic, b.CreatedAt, b.UpdatedAt));
+        ssdIds,
+        hddIds, b.IsPublic, b.CreatedAt, b.UpdatedAt));
     }
 
     private async Task<(Guid id, CoolingKind kind)?> ResolveCoolingAsync(Guid id, CancellationToken ct)

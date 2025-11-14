@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PcConfigurator.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5057aed2ad4ddf0de6df616402548944baef4988")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6dffa62f2d5788ba83854a5f2d7a1dca8890cb81")]
 [assembly: System.Reflection.AssemblyProductAttribute("PcConfigurator.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PcConfigurator.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
